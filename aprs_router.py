@@ -126,11 +126,11 @@ tts_queue: queue.Queue = queue.Queue()
 
 
 def tts_worker() -> None:
-    piper_bin = os.path.expanduser("~/piper/piper")
+    piper_bin  = str(Path.home() / "piper" / "piper")
     model_name = config["tts"]["model"]
-    model_path = os.path.expanduser(f"~/piper/voices/{model_name}.onnx")
-    wav_path = "/tmp/aprs_tts.wav"
-    audio_dev = config["tts"].get("audio_device", "default")
+    model_path = str(Path.home() / "piper" / "voices" / f"{model_name}.onnx")
+    wav_path   = "/tmp/aprs_tts.wav"
+    audio_dev  = config["tts"].get("audio_device", "default")
 
     while True:
         text = tts_queue.get()
@@ -145,7 +145,9 @@ def tts_worker() -> None:
             )
             if result.returncode == 0:
                 play_cmd = ["aplay", wav_path] if audio_dev == "default" else ["aplay", "-D", audio_dev, wav_path]
-                subprocess.run(play_cmd, capture_output=True, timeout=30)
+                play_result = subprocess.run(play_cmd, capture_output=True, timeout=30)
+                if play_result.returncode != 0:
+                    log.warning("aplay error: %s", play_result.stderr.decode(errors="replace"))
             else:
                 log.warning("Piper error: %s", result.stderr.decode(errors="replace"))
         except FileNotFoundError:
@@ -630,6 +632,20 @@ def api_ack(msg_id: int):
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/inject", methods=["POST"])
+def api_inject():
+    """Inject a raw TNC2 packet directly into the processing pipeline.
+    Used by tools/test_receive.py to test DB → TTS → WebSocket → UI
+    without requiring actual RF or AGW loopback from Direwolf."""
+    body = request.get_json(force=True) or {}
+    raw = body.get("raw", "").strip()
+    if not raw:
+        return jsonify({"error": "raw field required"}), 400
+    origin = body.get("origin", "rf")
+    process_packet(raw, origin)
+    return jsonify({"status": "injected", "raw": raw, "origin": origin})
+
+
 # ── Startup announcement ──────────────────────────────────────────────────────
 
 def _startup_announcement() -> None:
@@ -643,9 +659,9 @@ def _startup_announcement() -> None:
 if __name__ == "__main__":
     init_db()
 
-    threading.Thread(target=tts_worker,       daemon=True, name="tts").start()
-    threading.Thread(target=_agw_reader,      daemon=True, name="agw").start()
-    threading.Thread(target=_aprs_is_reader,  daemon=True, name="aprs_is").start()
+    threading.Thread(target=tts_worker,           daemon=True, name="tts").start()
+    threading.Thread(target=_agw_reader,           daemon=True, name="agw").start()
+    threading.Thread(target=_aprs_is_reader,       daemon=True, name="aprs_is").start()
     threading.Thread(target=_startup_announcement, daemon=True, name="announce").start()
 
     log.info("APRS Station %s starting on http://localhost:5000", MYCALL)
