@@ -673,4 +673,4 @@ if __name__ == "__main__":
     threading.Thread(target=_startup_announcement, daemon=True, name="announce").start()
 
     log.info("APRS Station %s starting on http://localhost:5000", MYCALL)
-    socketio.run(app, host="127.0.0.1", port=5000, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
