@@ -632,6 +632,14 @@ def api_ack(msg_id: int):
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/test_tts", methods=["POST"])
+def api_test_tts():
+    """Queue a short audio check phrase through the live TTS worker."""
+    call_speech = callsign_to_speech(CALLSIGN)
+    tts_queue.put(f"Audio check. {call_speech} station. Text to speech is working correctly.")
+    return jsonify({"status": "queued"})
+
+
 @app.route("/api/inject", methods=["POST"])
 def api_inject():
     """Inject a raw TNC2 packet directly into the processing pipeline.

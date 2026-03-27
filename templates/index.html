@@ -72,6 +72,18 @@
   .dot-yellow { background: var(--yellow);box-shadow: 0 0 6px var(--yellow); }
   .dot-gray   { background: var(--muted); }
   #uptime { margin-left: auto; color: var(--muted); font-size: 12px; font-family: var(--font-mono); }
+  #audio-test-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #audio-test-btn:hover { border-color: var(--green); color: var(--green); }
+  #audio-test-btn.playing { border-color: var(--green); color: var(--green); }
 
   /* ── Main body ───────────────────────────────────────────── */
   #main {
@@ -269,6 +281,7 @@
     <span id="is-label">APRS-IS</span>
   </span>
   <span id="uptime"></span>
+  <button id="audio-test-btn" title="Play a test phrase through the TTS speaker">&#128266; Test Audio</button>
 </div>
 
 <div id="main">
@@ -529,6 +542,28 @@ function showToast(type, text) {
 function hideToast() {
   toast.style.display = "none";
 }
+
+// ── Audio test button ─────────────────────────────────────────────────────────
+document.getElementById("audio-test-btn").addEventListener("click", function () {
+  const btn = this;
+  btn.textContent = "\uD83D\uDD0A Playing\u2026";
+  btn.classList.add("playing");
+  btn.disabled = true;
+  fetch("/api/test_tts", { method: "POST" })
+    .then(() => {
+      // Re-enable after 6 s — enough time for Piper + aplay to finish
+      setTimeout(() => {
+        btn.textContent = "\uD83D\uDD0A Test Audio";
+        btn.classList.remove("playing");
+        btn.disabled = false;
+      }, 6000);
+    })
+    .catch(() => {
+      btn.textContent = "\uD83D\uDD0A Test Audio";
+      btn.classList.remove("playing");
+      btn.disabled = false;
+    });
+});
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 function esc(s) {
