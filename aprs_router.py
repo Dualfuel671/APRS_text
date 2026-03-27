@@ -246,6 +246,14 @@ _KISS_TFESC = 0xDD
 _kiss_sock: socket.socket | None = None
 _kiss_lock = threading.Lock()
 
+# ── Message retry queue ────────────────────────────────────────────────────────
+# Outbound messages waiting for ACK.  Keyed by message_id string.
+# Retransmitted every 30 s, up to MAX_RETRIES times, then abandoned.
+_pending_acks: dict = {}
+_pending_lock = threading.Lock()
+MAX_RETRIES   = 5
+RETRY_INTERVAL = 30  # seconds between attempts
+
 
 def _ax25_encode_addr(call: str, ssid: int = 0, last: bool = False) -> bytes:
     call = call.upper().ljust(6)[:6]
@@ -305,6 +313,33 @@ def _kiss_transmit(info: str) -> None:
                 pass
             _kiss_sock = None
             raise
+
+
+# ── Message retry worker ──────────────────────────────────────────────────────
+
+def _retry_worker() -> None:
+    """Background thread: retransmit unACKed outbound messages every 30 s."""
+    while True:
+        time.sleep(5)
+        now = time.time()
+        with _pending_lock:
+            for mid, entry in list(_pending_acks.items()):
+                if now < entry["next_retry"]:
+                    continue
+                if entry["attempts"] >= MAX_RETRIES:
+                    log.warning("MSG %s to %s: no ACK after %d tries — giving up",
+                                mid, entry["to"], MAX_RETRIES)
+                    socketio.emit("message_status", {"id": mid, "status": "failed"})
+                    del _pending_acks[mid]
+                else:
+                    try:
+                        _kiss_transmit(entry["info"])
+                        entry["attempts"] += 1
+                        entry["next_retry"] = now + RETRY_INTERVAL
+                        log.info("MSG %s retry %d/%d -> %s",
+                                 mid, entry["attempts"], MAX_RETRIES, entry["to"])
+                    except Exception as e:
+                        log.error("Retry transmit failed: %s", e)
 
 
 # ── Packet processing ─────────────────────────────────────────────────────────
@@ -392,8 +427,17 @@ def _handle_inbound(parsed: dict, from_call: str) -> None:
     msg_text = parsed.get("message_text", "")
     msg_id = parsed.get("msgNo", "")
 
-    # Ignore ACK / REJ
-    if msg_text.lower().startswith(("ack", "rej")):
+    # Handle ACK / REJ
+    if msg_text.lower().startswith("ack"):
+        acked_id = msg_text[3:].strip()
+        with _pending_lock:
+            entry = _pending_acks.pop(acked_id, None)
+        if entry:
+            log.info("ACK received for msg %s from %s after %d attempt(s)",
+                     acked_id, from_call, entry["attempts"])
+            socketio.emit("message_status", {"id": acked_id, "status": "acked"})
+        return
+    if msg_text.lower().startswith("rej"):
         return
 
     db = get_db()
@@ -603,6 +647,14 @@ def api_send():
     except Exception as e:
         return jsonify({"error": f"Direwolf unavailable: {e}"}), 503
 
+    with _pending_lock:
+        _pending_acks[mid] = {
+            "info":       info,
+            "to":         to,
+            "attempts":   1,
+            "next_retry": time.time() + RETRY_INTERVAL,
+        }
+
     db = get_db()
     db.execute(
         "INSERT INTO messages (direction, from_call, to_call, message_text, message_id) VALUES (?,?,?,?,?)",
@@ -670,6 +722,7 @@ if __name__ == "__main__":
     threading.Thread(target=tts_worker,           daemon=True, name="tts").start()
     threading.Thread(target=_agw_reader,           daemon=True, name="agw").start()
     threading.Thread(target=_aprs_is_reader,       daemon=True, name="aprs_is").start()
+    threading.Thread(target=_retry_worker,         daemon=True, name="retry").start()
     threading.Thread(target=_startup_announcement, daemon=True, name="announce").start()
 
     log.info("APRS Station %s starting on http://localhost:5000", MYCALL)
