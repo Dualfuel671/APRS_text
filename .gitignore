@@ -1,0 +1,23 @@
+# SQLite packet/message log — regenerated at runtime
+data/aprs_log.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+aprs_env/
+
+# Temp files
+/tmp/
+
+# config.yaml contains your APRS-IS passcode — keep it off GitHub.
+# Copy config.yaml.example to config.yaml and fill in your values.
+config.yaml
+
+# Install log (machine-specific)
+setup/install.log
+
+# Claude Code local settings
+.claude/

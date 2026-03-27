@@ -1,0 +1,46 @@
+# APRS Station Configuration — EXAMPLE / TEMPLATE
+# ─────────────────────────────────────────────────
+# Copy this file to config.yaml and fill in your values:
+#   cp config.yaml.example config.yaml
+#
+# config.yaml is excluded from version control (.gitignore) because it
+# contains your APRS-IS passcode. Never commit the real config.yaml.
+
+# ── Station identity ──────────────────────────────────────────────────────────
+callsign: N0CALL          # Your FCC callsign — no SSID here
+ssid: 0                   # 0 = home (no suffix), 9 = mobile, etc.
+passcode: ''              # Leave blank — install.sh calculates it from your callsign
+frequency: 144.39         # APRS nationwide frequency (MHz) — do not change
+symbol_table: /
+symbol_code: '-'          # '-' = house symbol; see APRS symbol reference for others
+beacon_comment: My APRS Station
+
+partner_callsign: N0CALL  # Callsign of the other station you communicate with
+
+# ── APRS-IS internet gateway ──────────────────────────────────────────────────
+aprs_is:
+  enabled: true
+  server: rotate.aprs2.net
+  port: 14580
+  # Range filter: receive packets within RADIUS km of your location
+  # Replace LAT and LON with your decimal coordinates (negative LON for west)
+  filter: r/LAT/LON/100
+
+# ── Direwolf TNC settings ─────────────────────────────────────────────────────
+direwolf:
+  # Run tools/find_aioc.sh after plugging in the AIOC to confirm this value.
+  # AIOC is usually card 1 on a fresh system → plughw:1,0
+  adevice: plughw:1,0
+  ptt_method: CM108
+  # Always use the udev symlink — never hardcode /dev/hidrawN (changes at boot)
+  ptt_device: /dev/aioc_hid
+  via_path: WIDE1-1       # Standard path for home/portable stations
+
+# ── Text-to-speech ────────────────────────────────────────────────────────────
+tts:
+  engine: piper
+  model: en_US-lessac-medium
+  audio_device: default   # 'default' = system audio output
+
+# ── UI / display ──────────────────────────────────────────────────────────────
+kiosk_mode: false         # true = launch Chromium fullscreen on boot (RPi display)
