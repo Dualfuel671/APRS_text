@@ -427,17 +427,16 @@ def _handle_inbound(parsed: dict, from_call: str) -> None:
     msg_text = parsed.get("message_text", "")
     msg_id = parsed.get("msgNo", "")
 
-    # Handle ACK / REJ
-    if msg_text.lower().startswith("ack"):
-        acked_id = msg_text[3:].strip()
-        with _pending_lock:
-            entry = _pending_acks.pop(acked_id, None)
-        if entry:
-            log.info("ACK received for msg %s from %s after %d attempt(s)",
-                     acked_id, from_call, entry["attempts"])
-            socketio.emit("message_status", {"id": acked_id, "status": "acked"})
-        return
-    if msg_text.lower().startswith("rej"):
+    # Handle ACK / REJ — aprslib sets response='ACK'/'REJ', msgNo=id, msg_text=''
+    response = parsed.get("response", "").upper()
+    if response in ("ACK", "REJ"):
+        if response == "ACK":
+            with _pending_lock:
+                entry = _pending_acks.pop(msg_id, None)
+            if entry:
+                log.info("ACK received for msg %s from %s after %d attempt(s)",
+                         msg_id, from_call, entry["attempts"])
+                socketio.emit("message_status", {"id": msg_id, "status": "acked"})
         return
 
     db = get_db()
