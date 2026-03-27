@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations  # enables X | Y unions on Python 3.9 (RPi OS Bullseye)
 """
 APRS Station Router — KE8DCJ / KE8DUO dual-station backend.
 
