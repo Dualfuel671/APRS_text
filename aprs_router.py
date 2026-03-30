@@ -683,6 +683,25 @@ def api_ack(msg_id: int):
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/pending_retries")
+def api_pending_retries():
+    """Return list of message_ids currently in the retry queue."""
+    with _pending_lock:
+        return jsonify(list(_pending_acks.keys()))
+
+
+@app.route("/api/cancel_retry/<msg_id>", methods=["POST"])
+def api_cancel_retry(msg_id: str):
+    """Remove a message from the retry queue, stopping further retransmissions."""
+    with _pending_lock:
+        entry = _pending_acks.pop(msg_id, None)
+    if entry is None:
+        return jsonify({"error": "not found"}), 404
+    log.info("MSG %s retry cancelled by user after %d attempt(s)", msg_id, entry["attempts"])
+    socketio.emit("message_status", {"id": msg_id, "status": "cancelled"})
+    return jsonify({"status": "cancelled"})
+
+
 @app.route("/api/test_tts", methods=["POST"])
 def api_test_tts():
     """Queue a short audio check phrase through the live TTS worker."""

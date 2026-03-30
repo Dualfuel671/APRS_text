@@ -198,6 +198,23 @@
   .msg-text { font-size: 13px; color: var(--text); word-break: break-word; }
   .msg-time { font-size: 11px; color: var(--muted); margin-top: 2px; }
   #messages-empty { padding: 20px 16px; color: var(--muted); font-size: 13px; }
+  .cancel-retry-btn {
+    background: transparent;
+    border: 1px solid var(--orange);
+    color: var(--orange);
+    padding: 1px 7px;
+    border-radius: 3px;
+    font-size: 11px;
+    cursor: pointer;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .cancel-retry-btn:hover { background: rgba(210,153,34,.15); }
+  .cancel-retry-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .msg-status { font-size: 11px; margin-left: 8px; vertical-align: middle; }
+  .msg-status.acked     { color: var(--green); }
+  .msg-status.failed    { color: var(--red); }
+  .msg-status.cancelled { color: var(--muted); }
 
   /* ── Packet stream ───────────────────────────────────────── */
   #stream-panel {
@@ -336,6 +353,7 @@ let myCall = "";
 let partnerCall = "";
 let packetCount = 0;
 const MAX_PACKETS = 100;
+const pendingRetries = new Set();  // APRS message_ids currently in the retry queue
 
 // ── Socket.IO ────────────────────────────────────────────────────────────────
 const socket = io({ transports: ["websocket", "polling"] });
@@ -344,8 +362,23 @@ socket.on("connect",    () => console.log("WS connected"));
 socket.on("disconnect", () => console.log("WS disconnected"));
 
 socket.on("packet",  pkt => addPacket(pkt));
-socket.on("message", msg => addMessage(msg));
+socket.on("message", msg => addMessage(msg, msg.direction === "OUT"));
 socket.on("status",  st  => applyStatus(st));
+
+// ── Retry status updates ─────────────────────────────────────────────────────
+socket.on("message_status", ({ id, status }) => {
+  pendingRetries.delete(id);
+  const row = document.querySelector(`.msg-row[data-mid="${id}"]`);
+  if (!row) return;
+  const btn = row.querySelector(".cancel-retry-btn");
+  if (btn) btn.remove();
+  const header = row.querySelector(".msg-header");
+  const indicator = document.createElement("span");
+  indicator.className = "msg-status " + status;
+  const labels = { acked: "\u2713 ACK\u2019d", failed: "\u2717 No ACK", cancelled: "\u2298 Cancelled" };
+  indicator.textContent = labels[status] || status;
+  header.appendChild(indicator);
+});
 
 // ── Status bar ───────────────────────────────────────────────────────────────
 function applyStatus(st) {
@@ -428,7 +461,8 @@ document.getElementById("clear-btn").addEventListener("click", () => {
 });
 
 // ── Messages panel ────────────────────────────────────────────────────────────
-function addMessage(msg) {
+// isPending: true when this OUT message is currently in the server retry queue
+function addMessage(msg, isPending) {
   const list = document.getElementById("messages-list");
   const empty = document.getElementById("messages-empty");
   if (empty) empty.remove();
@@ -438,19 +472,46 @@ function addMessage(msg) {
   row.className = "msg-row " + (isIn ? "in" : "out") + (isIn && !msg.read ? " unread" : "");
   if (msg.id) row.dataset.id = msg.id;
 
+  // APRS message_id (for retry tracking) — distinct from the DB row id
+  const aprsId = !isIn ? (msg.message_id || (typeof msg.id === "string" ? msg.id : null)) : null;
+  if (aprsId) row.dataset.mid = aprsId;
+
   const from = esc(msg.from_call);
   const to   = esc(msg.to_call);
   const arrow = isIn
     ? `<span class="arrow">&#9654;</span> ${from} &rarr; ${to}`
     : `<span class="arrow">&#9664;</span> ${from} &rarr; ${to}`;
 
+  // Cancel retry button — shown only while the message is pending
+  let cancelBtn = "";
+  if (aprsId && (isPending || pendingRetries.has(aprsId))) {
+    pendingRetries.add(aprsId);
+    cancelBtn = `<button class="cancel-retry-btn" data-mid="${esc(aprsId)}">Cancel Retry</button>`;
+  }
+
   row.innerHTML =
-    `<div class="msg-header">${arrow}</div>` +
+    `<div class="msg-header">${arrow}${cancelBtn}</div>` +
     `<div class="msg-text">${esc(msg.text)}</div>` +
     `<div class="msg-time">${esc(msg.timestamp)}</div>`;
 
   if (isIn) {
     row.addEventListener("click", () => markRead(row, msg.id));
+  }
+
+  const btn = row.querySelector(".cancel-retry-btn");
+  if (btn) {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const mid = btn.dataset.mid;
+      btn.disabled = true;
+      btn.textContent = "Cancelling\u2026";
+      fetch("/api/cancel_retry/" + mid, { method: "POST" })
+        .catch(() => {
+          btn.disabled = false;
+          btn.textContent = "Cancel Retry";
+        });
+      // UI update is driven by the message_status socket event
+    });
   }
 
   list.insertBefore(row, list.firstChild);
@@ -463,19 +524,25 @@ function markRead(row, id) {
     .catch(() => {});
 }
 
-// Load existing messages on page load
-fetch("/api/messages").then(r => r.json()).then(msgs => {
+// Load existing messages on page load; also fetch which are still pending retry
+Promise.all([
+  fetch("/api/messages").then(r => r.json()),
+  fetch("/api/pending_retries").then(r => r.json()).catch(() => []),
+]).then(([msgs, pending]) => {
+  const pendingSet = new Set(pending);
+  pending.forEach(id => pendingRetries.add(id));
   // Oldest first so prepend puts newest on top
   [...msgs].reverse().forEach(m => {
     addMessage({
-      from_call: m.from_call,
-      to_call:   m.to_call,
-      text:      m.message_text,
-      direction: m.direction,
-      timestamp: m.received_at ? m.received_at.split(" ")[1] || m.received_at : "",
-      id:        m.id,
-      read:      m.read,
-    });
+      from_call:  m.from_call,
+      to_call:    m.to_call,
+      text:       m.message_text,
+      direction:  m.direction,
+      timestamp:  m.received_at ? m.received_at.split(" ")[1] || m.received_at : "",
+      id:         m.id,
+      message_id: m.message_id,   // APRS message_id for retry tracking
+      read:       m.read,
+    }, m.direction === "OUT" && m.message_id && pendingSet.has(m.message_id));
   });
 }).catch(() => {});
 
