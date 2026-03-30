@@ -64,7 +64,7 @@ and enables monitor mode with frame `m` immediately after connecting.
 Without a ferrite choke on the AIOC USB cable, RF couples into the cable during
 PTT and crashes Direwolf with an EPIPE error, leaving the radio keyed.  This is
 a **hardware fix** — no software workaround is sufficient.  Wrap 3–5 turns of
-the cable through a snap-on ferrite near the AIOC end.
+the cable through a toroid ferrite choke and ad a snap-on ferrite near the AIOC end.
 
 ---
 
